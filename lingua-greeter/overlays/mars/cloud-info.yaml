@@ -1,0 +1,12 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lingua-greeter
+spec:
+  template:
+    spec:
+      containers:
+      - name: lingua-greeter
+        env:
+        - name: CLOUD_PROFILE
+          value: Mars

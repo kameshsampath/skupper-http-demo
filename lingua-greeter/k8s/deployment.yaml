@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lingua-greeter
+spec:
+  selector:
+    matchLabels:
+      app: lingua-greeter
+  template:
+    metadata:
+      labels:
+        app: lingua-greeter
+    spec:
+      containers:
+      - name: lingua-greeter
+        image: rhdevelopers/lingua-greeter
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CLOUD_PROFILE
+          value: "{{.CLOUD_PROFILE}}"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /data/google-cloud-credentials.json
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 8080
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8080
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8080
+        volumeMounts:
+        - name: google-cloud-creds
+          mountPath: /data
+          readOnly: true
+      volumes:
+      - name: google-cloud-creds
+        secret:
+          secretName: google-cloud-creds

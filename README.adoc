@@ -1,0 +1,286 @@
+= Skupper HTTP Demo
+
+== Pre-requisites
+
+*  minikube
+*  kubectl
+*  Java 8 
+*  Nodejs
+
+kustomize::
+  Since we need to deploy to multiple clouds, using https://github.com/kubernetes-sigs/kustomize[kustomize] allows us to patch Kubernetes manifests that are unique for each cloud. 
+  
+skaffold::
+  https://skaffold.dev[Skaffold] allows us to do seamless deployment into kube clusters. Highly useful for development usecases
+
+skupper:: https://skupper.io[Skupper] is a layer 7 service interconnect. It enables secure communication across Kubernetes clusters with no VPNs or special firewall rules.
+
+== Setup 
+
+=== Create GCP secret
+
+ create secret generic google-cloud-creds --from-file=google-cloud-credentials.json=<your secret json file>
+
+[IMPORTANT]
+====
+Create three separate directories for `earth`,`mars` and `jupiter` which will hold the $KUBECONFIG for each environment.
+
+[source,bash,subs="+attributes,macros+"]
+----
+mkdir -p ./{earth,mars,jupiter}/.kube
+----
+====
+
+=== Earth 
+
+[source,bash,subs="+attributes,macros+"]
+----
+pushd earth > /dev/null 
+export KUBECONFIG="$(pwd)/.kube/config"
+minikube -p earth start \
+  --service-cluster-ip-range='10.96.10.0/27'
+popd > /dev/null
+----
+
+=== Enable Ingress
+
+The minikube earth need to gave ingress enabled for accessing the services outside the cluster. Let us https://haproxy-ingress.github.io/docs/getting-started/[haproxy ingress]
+
+[source,bash,subs="+attributes,macros+"]
+----
+kubectl label node earth role=ingress-controller
+kubectl create -f https://haproxy-ingress.github.io/resources/haproxy-ingress.yaml
+----
+
+Watch the `ingress-controller` daemonset for the nginx ingress controller to be up and running:
+
+[source,bash,subs="+attributes,macros+"]
+----
+kubectl get daemonset -n ingress-controller
+----
+
+In few minutes you should see the nginx ingress pod in the `ingress-controller` namespace:
+
+[source,bash]
+----
+NAME              DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR             AGE
+haproxy-ingress   1         1         1       1            1           role=ingress-controller   90s
+----
+
+Once the daemonset is running in  `ingress-controller`, check  the nginx ingress controller pod to be up and running:
+
+[source,bash,subs="+attributes,macros+"]
+----
+watch kubectl get pods -n ingress-controller
+----
+
+In few minutes you should see the nginx ingress pod in the `ingress-controller` namespace:
+
+[source,bash]
+----
+NAME                    READY   STATUS    RESTARTS   AGE
+haproxy-ingress-f64ps   1/1     Running   0          30s
+----
+
+=== Mars 
+
+[source,bash,subs="macros+,+attributes"]
+----
+pushd mars > /dev/null 
+export CLOUD_PROFILE='mars'
+export KUBECONFIG="$(pwd)/.kube/config"
+minikube -p mars start \
+  --service-cluster-ip-range='10.96.3.0/27'
+popd > /dev/null
+----
+
+== Tunnel
+
+Minikube tunnel allows us to interact with Kubernetes services using its **CLUSTER-IP** from the host.
+Once minikube **mars** started, open a new terminal and run 
+
+[source,bash,subs="macros+,+attributes"]
+----
+pushd mars > /dev/null 
+export KUBECONFIG="$(pwd)/.kube/config"
+minikube -p mars tunnel
+popd > /dev/null
+----
+
+=== Jupiter 
+
+[source,bash,subs="+attributes,macros+"]
+----
+pushd jupiter > /dev/null
+export CLOUD_PROFILE='jupiter'
+export KUBECONFIG="$(pwd)/.kube/config"
+minikube -p jupiter start \
+  --service-cluster-ip-range='172.16.3.0/27'
+popd > /dev/null
+----
+
+== Tunnel
+
+Minikube tunnel allows us to interact with Kubernetes services using its **CLUSTER-IP** from the host.
+Once minikube **jupiter** started, open a new terminal and run 
+
+[source,bash,subs="macros+,+attributes"]
+----
+pushd jupiter > /dev/null 
+export KUBECONFIG="$(pwd)/.kube/config"
+minikube -p jupiter tunnel
+popd > /dev/null
+----
+
+== Skupper Setup
+
+=== Mars(minikube)
+
+[source,bash,subs="+attributes,macros+"]
+----
+skupper init --id  mars
+----
+
+Wait for skupper to initialize `skupper status`
+
+Create connection token
+
+[source,bash,subs="+attributes,macros+"]
+----
+skupper connection-token ../mars-token.yaml
+----
+
+=== Jupiter(minikube)
+
+[source,bash,subs="+attributes,macros+"]
+----
+skupper init --id jupiter
+----
+
+Wait for skupper to initialize `skupper status`
+
+[source,bash,subs="+attributes,macros+"]
+----
+skupper connection-token ../jupiter-token.yaml
+skupper connect  --connection-name mars  ../mars-token.yaml
+----
+
+=== Earth(minikube)
+
+Create and change to use the namespace *demo* 
+
+[source,bash,subs="+attributes,macros+"]
+----
+kubectl create ns demo
+kubectl config set-context --current --namespace=demo 
+----
+
+[source,bash,subs="+attributes,macros+"]
+----
+skupper init --edge --id earth
+----
+
+Wait for skupper to initialize `skupper status`
+
+[source,bash,subs="+attributes,macros+"]
+----
+# lower the cost greater the affinity
+skupper connect  --connection-name mars --cost 1 ../mars-token.yaml
+# higher the cost lesser the affinity
+skupper connect  --connection-name jupiter --cost 20 ../jupiter-token.yaml
+----
+
+== Verify skupper setup
+
+* skupper list-connectors
+* skupper list-exposed
+* skupper check-connection all
+
+== Deploy lingua-greeter
+
+Expose Skupper Services
+
+==== Jupiter
+
+Ensure your context is in cloud `jupiter` by running the command ` kubectl config current-context`
+
+[source,bash,subs="+attributes,macros+"]
+----
+cd $PROJECT_HOME/jupiter
+skupper expose deployment lingua-greeter \
+ --address lingua-greeter \
+ --port 8080 --protocol tcp --target-port 8080
+----
+
+==== Mars
+
+Ensure your context is in cloud `mars` by running the command ` kubectl config current-context`
+
+[source,bash,subs="+attributes,macros+"]
+----
+cd $PROJECT_HOME/mars
+skupper expose deployment lingua-greeter \
+ --address lingua-greeter \
+ --port 8080 --protocol tcp --target-port 8080
+----
+
+== Deploy greetings-ticker
+
+Since the `greetings-ticker` is a SPA, we need to have the external url for accessing the `lingua-greeter` service via HTML. Run the following command to expose `lingua-greeter`
+
+[source,bash,subs="+attributes,macros+"]
+----
+export MINIKUBE_IP=$(minikube -p earth ip)
+cat k8s/lingua-greeter-ingress.yaml| envsubst | kubectl apply -n demo -f -
+----
+
+Get the ingress URL:
+[source,bash,subs="+attributes,macros+"]
+----
+LINGUA_GREETER_INGRESS_URL="$(kubectl get -n demo ingress lingua-greeter -o jsonpath='{.spec.rules[0].host}')"
+echo $LINGUA_GREETER_INGRESS_URL
+----
+
+Check the health of the back end:
+
+[source,bash,subs="+attributes,macros+"]
+----
+http $LINGUA_GREETER_INGRESS_URL/health/live
+----
+
+Ensure your context is in cloud `mars` by running the command ` kubectl config current-context`. 
+
+Verify if your are in *demo* namespace by running the command `kubectl config view --minify | grep namespace:`.
+
+[source,bash,subs="+attributes,macros+"]
+----
+cd $PROJECT_HOME/earth
+eval $(minikube -p earth docker-env)
+# create .env.production
+echo "NODE_ENV=production\nVUE_APP_MESSAGES_URL=http://$LINGUA_GREETER_INGRESS_URL" | tee .env.production
+----
+
+Before we deploy the greetings-ticker, check the list of services in the demo namespace, since we exposed `lingua-greeter` on other clouds (jupiter/mars) we should see it listed in `earth`, as we connected `earth` with `jupiter` and `mars` earlier.
+
+[source,bash,subs="+quotes"]
+====
+NAME                TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)    AGE
+*lingua-greeter      ClusterIP   10.96.10.2    <none>        8080/TCP   10m*
+skupper-messaging   ClusterIP   10.96.10.11   <none>        5671/TCP   22m
+====
+
+Deploy the application using the command:
+
+[source,bash,subs="+attributes,macros+"]
+----
+skaffold run --tail
+----
+
+Open the application in the browser using `minikube -p earth -n demo service greetings-ticker`. 
+
+== Verify load balancing
+
+You should by default start to see the messages coming from `mars`,  after few messages go to `mars` terminal and scale the `lingua-greeter` service to `0` and now you will see the responses from `Jupiter` only and do the vice versa to see the responses flipping back `mars`.
+
+IMPORTANT: Since we have set the *cost* to mars, the application will always try to go to `mars` by default
+
