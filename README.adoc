@@ -1,5 +1,7 @@
 = Skupper HTTP Demo
 
+A demo show using https://skupper.io[Skupper] with Kubernetes HTTP services to show seamless failover to next available cloud.
+
 == Pre-requisites
 
 *  minikube
@@ -11,15 +13,13 @@ kustomize::
   Since we need to deploy to multiple clouds, using https://github.com/kubernetes-sigs/kustomize[kustomize] allows us to patch Kubernetes manifests that are unique for each cloud. 
   
 skaffold::
-  https://skaffold.dev[Skaffold] allows us to do seamless deployment into kube clusters. Highly useful for development usecases
+  https://skaffold.dev[Skaffold] allows us to do seamless deployment into kube clusters. Highly useful for development use cases
 
 skupper:: https://skupper.io[Skupper] is a layer 7 service interconnect. It enables secure communication across Kubernetes clusters with no VPNs or special firewall rules.
 
+This Demo uses https://cloud.google.com/translate/docs[Google Translation], you need to have your Google API key (Json) which we will use it later when deploying `lingua-greeter`.
+
 == Setup 
-
-=== Create GCP secret
-
- create secret generic google-cloud-creds --from-file=google-cloud-credentials.json=<your secret json file>
 
 [IMPORTANT]
 ====
@@ -207,6 +207,9 @@ Ensure your context is in cloud `jupiter` by running the command ` kubectl confi
 [source,bash,subs="+attributes,macros+"]
 ----
 cd $PROJECT_HOME/jupiter
+export GOOGLE_APPLICATION_CREDENTIALS=<path to your Google API Key Json file>
+kubectl create secret generic google-cloud-creds \
+  --from-file="google-cloud-credentials.json=$GOOGLE_APPLICATION_CREDENTIALS"
 skupper expose deployment lingua-greeter \
  --address lingua-greeter \
  --port 8080 --protocol tcp --target-port 8080
@@ -219,6 +222,9 @@ Ensure your context is in cloud `mars` by running the command ` kubectl config c
 [source,bash,subs="+attributes,macros+"]
 ----
 cd $PROJECT_HOME/mars
+export GOOGLE_APPLICATION_CREDENTIALS=<path to your Google API Key Json file>
+kubectl create secret generic google-cloud-creds \
+  --from-file="google-cloud-credentials.json=$GOOGLE_APPLICATION_CREDENTIALS"
 skupper expose deployment lingua-greeter \
  --address lingua-greeter \
  --port 8080 --protocol tcp --target-port 8080
@@ -283,4 +289,3 @@ Open the application in the browser using `minikube -p earth -n demo service gre
 You should by default start to see the messages coming from `mars`,  after few messages go to `mars` terminal and scale the `lingua-greeter` service to `0` and now you will see the responses from `Jupiter` only and do the vice versa to see the responses flipping back `mars`.
 
 IMPORTANT: Since we have set the *cost* to mars, the application will always try to go to `mars` by default
-

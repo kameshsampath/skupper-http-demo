@@ -54,7 +54,8 @@ public class LinguaGreeterService {
             translateText(text,targetLangCode),targetLangCode);
             JsonObject transTextJson = new JsonObject().
              put("translatedText",translatedText)
-             .put("cloud", cloudProfile);
+             .put("cloud", cloudProfile)
+             .put("lang", value);
             return transTextJson.encode();
         });
     }
